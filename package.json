@@ -1,0 +1,85 @@
+{
+  "name": "scp-spherex",
+  "displayName": "SphereScript for SphereServer-X",
+  "description": "Syntax highlighting, completion, hover, diagnostics and formatting for SphereServer-X script files (.scp)",
+  "publisher": "sphereserver-uo",
+  "version": "0.1.0",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/Sphereserver/vscode-scp-extension.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:scp"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "scp",
+        "aliases": [
+          "SphereScript",
+          "SphereScript-X",
+          "scp"
+        ],
+        "extensions": [
+          ".scp"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "scp",
+        "scopeName": "source.scp",
+        "path": "./syntaxes/scp.tmLanguage.json"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "editor.action.formatDocument",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "editorTextFocus && editorLangId == 'scp'"
+      }
+    ],
+    "commands": [
+      {
+        "command": "spherescript.reindexSymbols",
+        "title": "SphereScript: Reindex Workspace Symbols"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "tsc -p tsconfig.test.json && mocha"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^18.19.130",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/test-electron": "^2.3.2",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.0.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.1.3"
+  }
+}
