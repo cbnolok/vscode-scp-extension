@@ -70,16 +70,20 @@ None - no external runtime dependencies.
 
 ## Known gaps
 
-- Most property/trigger descriptions are still empty. Only a hand-written,
-  verified-confident subset has been filled in so far (control keywords,
-  section keywords, most expression functions, and the new `regionProperties`/
-  `definitionProperties` buckets) - the much larger item/char/serv property
-  buckets (~1,700 entries) and all 248 triggers are still blank. That's
-  deliberate: a plausible-sounding but wrong description is worse than no
-  description, and neither guessing nor machine translation is an
-  acceptable way to fill this in. See `tools/keyword_scan/README.md` for
-  the review workflow and its English-only, hand-written-preferred,
-  Doxygen-only-for-C++-sourced-text policy.
+- Many property/trigger descriptions are still empty. `controlKeywords` and
+  `regionProperties` are fully filled; `definitionProperties` (88/91) and
+  `sectionKeywords` (57/63) are nearly complete. `triggers` is at 86/248
+  (35%), `itemProperties` at 138/626 (22%), `charProperties` at 119/581
+  (20%) - all hand-written and grounded in real usage from a Scripts-X
+  script-base scan plus the SphereServer-X mediawiki docs, not guessed or
+  machine-translated. `servProperties` (7/104) and `commands` (5/33) have
+  barely been started. That's deliberate: a plausible-sounding but wrong
+  description is worse than no description, so an entry was left blank
+  whenever its usage in the script base was ambiguous or absent, rather
+  than guessed. See `tools/keyword_scan/README.md` for the review workflow
+  and its English-only, hand-written-preferred, Doxygen-only-for-C++-sourced-
+  text policy. Next up, in priority order: finish `triggers`, then continue
+  `itemProperties`/`charProperties`, then `servProperties`.
 
 ## Development
 
