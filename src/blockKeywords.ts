@@ -36,7 +36,13 @@ export const CLOSING_FOR: Record<string, string> = {
     BEGIN: 'END',
 };
 
-export const CLOSING_KEYWORDS = ['ENDIF', 'ENDWHILE', 'ENDFOR', 'ENDDO', 'END'] as const;
+// ENDRAND/ENDSWITCH aren't CLOSING_FOR's canonical closer for DORAND/DOSWITCH
+// (ENDDO is), but the engine accepts all END* keywords interchangeably as a
+// block terminator (CScriptObj::OnTriggerRun treats SK_ENDDO/SK_ENDFOR/
+// SK_ENDIF/SK_ENDRAND/SK_ENDSWITCH/SK_ENDWHILE identically) - omitting them
+// here made a block closed with ENDRAND/ENDSWITCH register as unclosed
+// instead of just non-canonical.
+export const CLOSING_KEYWORDS = ['ENDIF', 'ENDWHILE', 'ENDFOR', 'ENDDO', 'END', 'ENDRAND', 'ENDSWITCH'] as const;
 
 /** ELSE/ELSEIF/ELIF only make sense directly inside an IF block. */
 export const MIDDLE_KEYWORDS = ['ELSE', 'ELSEIF', 'ELIF'] as const;

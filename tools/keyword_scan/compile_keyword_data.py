@@ -7,11 +7,15 @@ or into a handful of special buckets for things that aren't accessed via
 object.property syntax at all (triggers, section keywords, control-flow
 keywords, expression functions, console commands).
 
-Descriptions are taken ONLY from the inline C++ comment the scanner
-already captured (already English, straight from the engine source) -
-this script does not write or translate any prose itself. Entries with
-no usable comment simply get an empty description; that's an honest gap,
-not something to paper over.
+Descriptions are taken ONLY from a Doxygen-tagged inline C++ comment
+(///, //!, or their ///<///!< forms - see scan_keywords.py's
+comment_is_doxygen) that the scanner already captured (already English,
+straight from the engine source) - this script does not write, translate,
+or otherwise invent any prose itself, and it never uses a plain "//"
+comment, which is a contributor note rather than user-facing text. Entries
+with no usable comment simply get an empty description; that's an honest
+gap, meant to be filled by hand (see tools/keyword_scan/README.md), not
+papered over with a guess.
 
 This is a one-time bootstrap compile, not a build step - see
 tools/keyword_scan/README.md for why the ongoing workflow is manual
@@ -23,21 +27,37 @@ import sys
 from collections import defaultdict
 
 # Classes attributed to each script-side object prefix bucket, matched by
-# substring against source_class (mirrors, and extends, the heuristic
-# a_fork_prapilk/parser.py used). CObjBase/CBaseBaseDef are the common
+# substring against source_class (mirrors, and extends, the heuristic the
+# Prapilk fork's parser.py used). CObjBase/CBaseBaseDef are the common
 # ancestor of both items and chars, so they feed both buckets.
-BOTH_ITEM_AND_CHAR = ['CObjBase', 'CBaseBaseDef']
-CHAR_CLASSES = ['CChar', 'CClient', 'CStoneMember', 'CParty', 'CAccount']
-ITEM_CLASSES = ['CItem']
+# CPointBase (position/coordinate accessors) and CContainer (container
+# content accessors) are valid on both items and chars, like CObjBase.
+BOTH_ITEM_AND_CHAR = ['CObjBase', 'CBaseBaseDef', 'CPointBase', 'CContainer']
+CHAR_CLASSES = ['CChar', 'CClient', 'CStoneMember', 'CParty', 'CAccount', 'CCPropsChar']
+# CCPropsItem* (equippable/weapon/ranged-weapon property components),
+# CCMultiMovable (ship verbs) and CCChampion (live champion-spawn verbs,
+# not to be confused with CCChampionDef below) are all item-side.
+ITEM_CLASSES = ['CItem', 'CCPropsItem', 'CCMultiMovable', 'CCChampion']
 SERV_CLASSES = ['CServer', 'CSector', 'CSFileObj', 'CDataBase', 'CWorld', 'CGMPage']
 
 # Internal engine subsystems that showed up in the scan but are not
 # script-facing at all - drop entirely rather than dumping into
-# "unclassified" for review.
-EXCLUDE_SOURCE_CLASSES = {'UnixTerminal', 'ProfileData', 'CServerTime'}
+# "unclassified" for review. CUOInstall is client .mul/.idx *filenames*
+# (anim.mul, gumpart.mul, ...), not script keywords - a scanner false
+# positive caught by their content shape, not a naming pattern.
+EXCLUDE_SOURCE_CLASSES = {'UnixTerminal', 'ProfileData', 'CServerTime', 'CUOInstall'}
 
 # Categories from the .tbl scan that aren't script keyword data.
 EXCLUDE_CATEGORIES = {'classname', 'defmessage'}
+
+# Source classes whose keywords are section-body properties (set one per
+# line inside a definition block: [SPELL], [SKILL], [DIALOG], ...) rather
+# than accessed as object.property - not one of the object-prefix buckets,
+# but still real, still worth surfacing (general completion fallback).
+DEFINITION_PROPERTY_CLASSES = {
+    'CDialogDef', 'CSpellDef', 'CSkillDef', 'CSkillClassDef',
+    'CRandGroupDef', 'CWebPageDef', 'CCChampionDef', 'CRegionResourceDef',
+}
 
 MIN_COMMENT_LEN = 3
 
@@ -54,7 +74,12 @@ def classify(source_class):
     return None
 
 
-def clean_comment(comment):
+def clean_comment(comment, is_doxygen):
+    # Only a Doxygen-tagged comment is ever usable as description text - a
+    # plain "//" comment is a contributor note, not user-facing prose (see
+    # tools/keyword_scan/README.md's language/description policy).
+    if not is_doxygen:
+        return ''
     comment = comment.strip()
     if len(comment) < MIN_COMMENT_LEN:
         return ''
@@ -90,7 +115,8 @@ def main():
         category = row['category']
         source_class = row['source_class']
         name = row['name']
-        comment = clean_comment(row['comment'])
+        is_doxygen = str(row.get('comment_is_doxygen', '')).strip().lower() == 'true'
+        comment = clean_comment(row['comment'], is_doxygen)
 
         if category in EXCLUDE_CATEGORIES:
             continue
@@ -111,12 +137,40 @@ def main():
             add('control_keywords', name, comment, source_class)
             continue
 
+        # CScriptObj_functions.tbl (sm_szLoadKeys) - intrinsic functions
+        # available on any script object, same nature as CExpression's.
+        if source_class == 'CScriptObj' and category == 'function':
+            add('expression_functions', name, comment, source_class)
+            continue
+
         if source_class == 'CExpression':
             add('expression_functions', name, comment, source_class)
             continue
 
+        # Reserved trigger-context variables (ARGN/ARGO/ARGS/ARGV/LOCAL/...) -
+        # used bare, like a control keyword, not accessed via object.property.
+        if source_class == 'CScriptTriggerArgs':
+            add('control_keywords', name, comment, source_class)
+            continue
+
         if category == 'sm_szVerbKeys' and source_class in ('CClient', 'CServer'):
             add('commands', name, comment, source_class)
+            continue
+
+        # REGION.xxx - a real dot-accessible object prefix (verified against
+        # CRegion's own r_GetRef-style dispatch), not a definition-body
+        # property like the classes below.
+        if source_class == 'CRegion':
+            add('region_properties', name, comment, source_class)
+            continue
+
+        # Properties set one per line inside various definition section
+        # bodies ([SPELL], [SKILL], [DIALOG], [WEBPAGE], [CHAMPION], a
+        # region's [REGIONRESOURCE] block, ...) - not object.property syntax,
+        # so they don't belong in item/char/serv_properties, but they're
+        # real and worth surfacing (general completion fallback).
+        if source_class in DEFINITION_PROPERTY_CLASSES:
+            add('definition_properties', name, comment, source_class)
             continue
 
         targets = classify(source_class)
@@ -128,7 +182,7 @@ def main():
 
     order = ['item_properties', 'char_properties', 'serv_properties', 'triggers',
               'section_keywords', 'control_keywords', 'expression_functions',
-              'commands', 'unclassified']
+              'commands', 'region_properties', 'definition_properties', 'unclassified']
 
     print('Bucket counts (with description coverage):')
     total = 0
@@ -147,9 +201,10 @@ def main():
     lines = []
     lines.append('// Generated by tools/keyword_scan/compile_keyword_data.py from a SphereServer-X')
     lines.append('// source scan - see tools/keyword_scan/README.md before editing by hand.')
-    lines.append('// Descriptions are sourced only from English inline C++ comments in the engine')
-    lines.append("// source; many entries have none yet (description: '') - that's an honest gap,")
-    lines.append('// fill in via the divergence-report review workflow, not by guessing here.')
+    lines.append('// Descriptions are sourced only from Doxygen-tagged (///, //!) English inline C++')
+    lines.append('// comments in the engine source, never a plain "//" comment (a contributor note,')
+    lines.append("// not user-facing prose); many entries have none yet (description: '') - that's an")
+    lines.append('// honest gap, fill in by hand via the divergence-report review workflow.')
     lines.append('')
     lines.append('export interface KeywordEntry {')
     lines.append('    name: string;')

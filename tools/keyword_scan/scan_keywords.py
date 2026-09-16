@@ -61,7 +61,29 @@ TBL_DIFF_EXCLUDE = {"defmessages.tbl", "classnames.tbl"}
 STRING_LINE_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 ADD_STR_RE = re.compile(r'ADD(?:PROP)?\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"((?:[^"\\]|\\.)*)"')
 ADD_BARE_RE = re.compile(r'ADD\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)')
-TRAILING_COMMENT_RE = re.compile(r'//\s*(.*)$')
+
+# Doxygen-style trailing comments (///, //!, and their "///<"/"//!<" member-
+# doc forms) vs. a plain "//" comment. This distinction matters: plain "//"
+# comments in this codebase are contributor notes ("// static", "// TODO"),
+# not user-facing prose, so only a Doxygen-tagged comment is ever offered as
+# description text - see the language policy in README.md. Block-comment
+# Doxygen forms (/** ... */, /*! ... */) are not handled: none were found
+# anywhere near a keyword table as of the commit this was written against
+# (see README.md), so it wasn't worth the complexity - revisit if that changes.
+DOXYGEN_TRAILING_RE = re.compile(r'^\s*//([/!])<?\s*(.*)$')
+PLAIN_TRAILING_RE = re.compile(r'^\s*//\s*(.*)$')
+
+
+def parse_trailing_comment(rest):
+    """rest: the text of a line after the token being commented. Returns
+    (comment_text, is_doxygen)."""
+    m = DOXYGEN_TRAILING_RE.match(rest)
+    if m:
+        return m.group(2).strip(), True
+    m = PLAIN_TRAILING_RE.match(rest)
+    if m:
+        return m.group(1).strip(), False
+    return '', False
 
 # Sphere's static keyword tables don't follow one consistent naming
 # convention (sm_sz..., sm_ptc..., or no prefix at all), so instead of
@@ -127,20 +149,20 @@ def line_of(text, pos):
 
 
 def parse_string_array(body):
-    """body: text between array's { and }. Returns list of (string, comment)
-    in order. Handles both one-entry-per-line tables (the common case in
-    this codebase) and short arrays written on a single line - a trailing
-    // comment on a line is attached to the last entry on that line."""
+    """body: text between array's { and }. Returns list of (string, comment,
+    is_doxygen) in order. Handles both one-entry-per-line tables (the common
+    case in this codebase) and short arrays written on a single line - a
+    trailing comment on a line is attached to the last entry on that line."""
     out = []
     for raw_line in body.split('\n'):
         matches = list(STRING_LINE_RE.finditer(raw_line))
         if not matches:
             continue
         rest = raw_line[matches[-1].end():]
-        cm = TRAILING_COMMENT_RE.search(rest)
-        comment = cm.group(1).strip() if cm else ''
+        comment, is_doxygen = parse_trailing_comment(rest)
         for i, sm in enumerate(matches):
-            out.append((sm.group(1), comment if i == len(matches) - 1 else ''))
+            last = i == len(matches) - 1
+            out.append((sm.group(1), comment if last else '', is_doxygen if last else False))
     return out
 
 
@@ -174,8 +196,7 @@ def scan_tbl_file(path, rows):
             if not m:
                 continue
             name, value = m.group(1), m.group(1)
-        cm = TRAILING_COMMENT_RE.search(line[m.end():])
-        comment = cm.group(1).strip() if cm else ''
+        comment, is_doxygen = parse_trailing_comment(line[m.end():])
         rows.append({
             'name': value,
             'category': category,
@@ -183,6 +204,7 @@ def scan_tbl_file(path, rows):
             'source_file': os.path.relpath(path, start=SRC_ROOT),
             'source_line': lineno,
             'comment': comment,
+            'comment_is_doxygen': is_doxygen,
         })
 
 
@@ -202,7 +224,7 @@ def scan_cpp_h_file(path, rows):
         if len(entries) < MIN_TABLE_ENTRIES:
             continue
 
-        keyword_shaped = sum(1 for v, _ in entries if IDENTIFIER_LIKE_RE.match(v))
+        keyword_shaped = sum(1 for v, _, _ in entries if IDENTIFIER_LIKE_RE.match(v))
         if keyword_shaped / len(entries) < MIN_KEYWORD_SHAPE_RATIO:
             continue  # looks like prose / paths / message text, not a keyword table
 
@@ -213,7 +235,7 @@ def scan_cpp_h_file(path, rows):
             source_class, category = file_class_name, ident
 
         lineno = line_of(text, m.start())
-        for value, comment in entries:
+        for value, comment, is_doxygen in entries:
             rows.append({
                 'name': value,
                 'category': category,
@@ -221,6 +243,7 @@ def scan_cpp_h_file(path, rows):
                 'source_file': rel,
                 'source_line': lineno,
                 'comment': comment,
+                'comment_is_doxygen': is_doxygen,
             })
 
 
@@ -248,7 +271,7 @@ def walk_source(src_root):
 
 # --- Baseline (src/keywordData.ts, compiled by compile_keyword_data.py) ---
 #
-# Note: this is NOT the same schema as a_fork_prapilk's autocompleteData.ts
+# Note: this is NOT the same schema as the Prapilk fork's autocompleteData.ts
 # (plain name arrays + separate *_descriptions dicts). keywordData.ts holds
 # one array of { name, description, sourceClass } objects per bucket - see
 # compile_keyword_data.py. If you're diffing against a pre-consolidation
@@ -257,7 +280,7 @@ def walk_source(src_root):
 BUCKET_KEYS = [
     'itemProperties', 'charProperties', 'servProperties', 'triggers',
     'sectionKeywords', 'controlKeywords', 'expressionFunctions',
-    'commands', 'unclassified',
+    'commands', 'regionProperties', 'definitionProperties', 'unclassified',
 ]
 
 ENTRY_RE = re.compile(
@@ -336,14 +359,24 @@ def build_diff(scan_rows, baseline_arrays, baseline_dicts):
                 'source_line': row['source_line'],
                 'baseline_categories': '',
                 'scanned_comment': row['comment'],
+                'comment_is_doxygen': row['comment_is_doxygen'],
                 'baseline_description': '',
             })
             continue
 
         baseline_desc = all_descriptions.get(name_upper, '')
         if row['comment'] and row['comment'] != baseline_desc:
+            # Only a Doxygen-tagged comment (///, //!) is ever a candidate to
+            # become description text - a plain "//" comment is a contributor
+            # note, not user-facing prose (see README.md). Non-Doxygen diffs
+            # are still reported, just under a type that makes clear they're
+            # context for a human-written description, not a ready one.
+            if row['comment_is_doxygen']:
+                change_type = 'DESCRIPTION_DIFF' if baseline_desc else 'DESCRIPTION_AVAILABLE'
+            else:
+                change_type = 'COMMENT_AVAILABLE_NON_DOXYGEN'
             diff_rows.append({
-                'change_type': 'DESCRIPTION_DIFF' if baseline_desc else 'DESCRIPTION_AVAILABLE',
+                'change_type': change_type,
                 'name': row['name'],
                 'category': row['category'],
                 'source_class': row['source_class'],
@@ -351,6 +384,7 @@ def build_diff(scan_rows, baseline_arrays, baseline_dicts):
                 'source_line': row['source_line'],
                 'baseline_categories': '|'.join(sorted(name_to_baseline_categories[name_upper])),
                 'scanned_comment': row['comment'],
+                'comment_is_doxygen': row['comment_is_doxygen'],
                 'baseline_description': baseline_desc,
             })
 
@@ -364,6 +398,7 @@ def build_diff(scan_rows, baseline_arrays, baseline_dicts):
             'source_line': '',
             'baseline_categories': '|'.join(sorted(name_to_baseline_categories[name_upper])),
             'scanned_comment': '',
+            'comment_is_doxygen': False,
             'baseline_description': all_descriptions.get(name_upper, ''),
         })
 
@@ -400,7 +435,7 @@ def main():
 
     raw_path = os.path.join(args.out, 'scan_raw.csv')
     with open(raw_path, 'w', newline='', encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=['name', 'category', 'source_class', 'source_file', 'source_line', 'comment'])
+        w = csv.DictWriter(f, fieldnames=['name', 'category', 'source_class', 'source_file', 'source_line', 'comment', 'comment_is_doxygen'])
         w.writeheader()
         w.writerows(scan_rows)
     print(f'Wrote {raw_path}')
@@ -423,7 +458,8 @@ def main():
     with open(diff_path, 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=[
             'change_type', 'name', 'category', 'source_class', 'source_file',
-            'source_line', 'baseline_categories', 'scanned_comment', 'baseline_description',
+            'source_line', 'baseline_categories', 'scanned_comment', 'comment_is_doxygen',
+            'baseline_description',
         ])
         w.writeheader()
         w.writerows(diff_rows)

@@ -52,20 +52,26 @@ future run can tell what's changed since. Last known-good run: commit
   source_class, source_file, source_line, comment`. Reference data, not
   meant to be read top-to-bottom.
 - **`divergence_report.csv`** - the actual review artifact, one row per
-  difference from the baseline:
+  difference from the baseline. Every row also carries `comment_is_doxygen`
+  (`True`/`False`) - whether `scanned_comment` was tagged `///`/`//!` (see
+  the language/description policy below):
   - `NEW` - keyword the scanner found but the baseline doesn't have. Add it.
   - `NOT_FOUND_IN_SCAN` - baseline keyword the scanner didn't find this run.
     **Read this as "the scanner didn't find it," not "the engine removed
     it."** Coverage is heuristic (see below) - check the known-gaps list
     before assuming something was actually removed from the engine.
   - `DESCRIPTION_AVAILABLE` - keyword exists in the baseline without a
-    description, and the source has an inline `//` comment next to it.
-    Candidate description text, not a ready-to-use one - the comment is
-    often a terse engine-dev note, not user-facing prose.
-  - `DESCRIPTION_DIFF` - keyword has a baseline description AND the source
-    comment differs. Deliberately not auto-applied: the baseline
-    description is very often better prose than the raw source comment
-    (translated, expanded, corrected) - review before overwriting.
+    description, and the source has a **Doxygen-tagged** (`///`/`//!`)
+    comment next to it - ready to use as description text (still worth a
+    read before pasting it in).
+  - `DESCRIPTION_DIFF` - keyword has a baseline description AND a Doxygen
+    source comment differs from it. Deliberately not auto-applied: the
+    baseline description is very often better prose than the raw source
+    comment (expanded, corrected) - review before overwriting.
+  - `COMMENT_AVAILABLE_NON_DOXYGEN` - keyword has a plain `//` comment next
+    to it in the source. This is **not** usable as description text as-is
+    (see the policy below) - it's shown only as context for writing a real,
+    hand-authored description; never copy it in verbatim.
 
 ## How to review a report
 
@@ -75,15 +81,20 @@ the master copy (and what the extension actually imports at runtime, via
 decide row by row what to do, and edit `keywordData.ts` directly:
 
 1. `NEW` rows → add a `{ name, description, sourceClass }` entry to the
-   right bucket array (see `compile_keyword_data.py`'s `classify()` for
-   which bucket a given `sourceClass` maps to - `itemProperties`/
-   `charProperties`/`servProperties` for anything object-prefix-accessed,
+   right bucket array (see `compile_keyword_data.py`'s `classify()` and the
+   special-cased `sourceClass` checks right above it in `main()` for which
+   bucket a given `sourceClass` maps to - `itemProperties`/`charProperties`/
+   `servProperties` for anything object-prefix-accessed, `regionProperties`
+   for `REGION.xxx`, `definitionProperties` for a keyword set one-per-line
+   inside a definition section body (`[SPELL]`, `[SKILL]`, `[DIALOG]`, ...),
    `unclassified` if none of those fit).
-2. `DESCRIPTION_AVAILABLE` / `DESCRIPTION_DIFF` → rewrite the source
+2. `DESCRIPTION_AVAILABLE` / `DESCRIPTION_DIFF` → rewrite the Doxygen source
    comment into a proper English sentence (see policy below) and set it as
    that entry's `description`, or leave the existing one as-is if it's
-   already better (raw C++ comments are often terse engine-dev notes, not
-   user-facing prose - don't paste them in verbatim without a look).
+   already better. `COMMENT_AVAILABLE_NON_DOXYGEN` rows never get pasted in
+   directly - read the comment for context, then write the description
+   yourself; if you're not confident what the keyword does, leave it blank
+   rather than guess.
 3. `NOT_FOUND_IN_SCAN` → check the file/line it last came from (in a
    previous `scan_raw.csv`, or `git log -S<name>` on the engine repo)
    before removing anything from `keywordData.ts`. Not every gap is real -
@@ -95,19 +106,35 @@ decide row by row what to do, and edit `keywordData.ts` directly:
    not matching `^[A-Za-z_][A-Za-z0-9_.]*$` as a name, but use judgment on
    what's left too.
 
-## Description/comment language policy
+## Description/comment language and sourcing policy
 
 **All descriptions and comments added to the extension's data - hover
 text, property/trigger/section descriptions, code comments in the scanner
 or the extension itself - must be English only.** No French or any other
 language, in new content or in translations of existing content.
 
-`keywordData.ts` was bootstrapped straight from English inline C++ comments
-in the engine source (never from a prior fork's wiki-scraped, partly-French
-data), so it starts clean - keep it that way. Most entries currently have
-an empty `description` (no usable source comment existed); that's an
-honest gap to fill via this workflow, not something to paper over with a
-guessed or machine-translated description.
+**Prefer a hand-written description over anything lifted from the C++
+source.** A plain `// ...` comment in the engine source is a note from one
+engine contributor to another (implementation detail, a `TODO`, a version
+tag) - it isn't written for a scripter and usually reads poorly as hover
+text. The scanner (`scan_keywords.py`) only ever treats a **Doxygen-tagged**
+comment (`///`, `//!`, or their `///<`/`//!<` member-doc forms) as a
+candidate description; a plain `//` comment is still captured (visible in
+`divergence_report.csv` as `COMMENT_AVAILABLE_NON_DOXYGEN`, and in
+`scan_raw.csv`'s `comment_is_doxygen` column) purely as context for a human
+writing the real description, never as text to paste in directly. This is
+enforced in `compile_keyword_data.py`'s `clean_comment()` too, for the rare
+case of re-bootstrapping from scratch.
+
+Most entries currently have an empty `description` (no confident,
+hand-written text has been added yet); that's an honest gap to fill via
+this workflow, not something to paper over with a guessed or
+machine-translated description. A small number of `sectionKeywords`/
+`expressionFunctions`/`commands` entries still carry a description sourced
+from a plain (non-Doxygen) comment from before this policy was written down
+- they were kept because they read fine as user-facing text, not because
+the policy doesn't apply to them; don't use them as a precedent for adding
+more the same way.
 
 ## Coverage: what the scanner catches, and how to extend it
 
@@ -126,7 +153,11 @@ Two things *do* need maintainer attention:
    `common/crypto`, `common/crashdump`, and `network` - engine plumbing
    that only produces noise (SQL keyword lists, crypto constants). If a
    subsystem under one of these later grows genuine script-facing keyword
-   tables, remove it from that list.
+   tables, remove it from that list. Similarly, `compile_keyword_data.py`'s
+   `EXCLUDE_SOURCE_CLASSES` drops whole source classes post-scan for the
+   same reason - e.g. `CUOInstall`, whose "table" is actually a list of
+   client `.mul`/`.idx` filenames, not script keywords, but happens to match
+   the shape heuristic below.
 
 2. **The detection heuristic itself.** It does not match on a naming
    convention (Sphere isn't consistent - `sm_sz...`, `sm_ptc...`,
@@ -147,12 +178,38 @@ As of commit `7e46c5aeb62ec1e0f8d9b1aa8c2c4095cd95eb20`, these baseline
 entries are legitimate scanner gaps rather than removed keywords - update
 this list as gaps get fixed or new ones are found:
 
-- `BC`, `CHUNK`, `MUSIC`, `PROPS` (commands) - not found in any static
-  initializer the scanner recognizes; likely dispatched some other way.
+- `BC`, `CHUNK`, `MUSIC`, `PROPS`, `HEALING` - these appeared in an older,
+  pre-consolidation data source (a prior fork's hand-collected/wiki data,
+  not this scanner) but were not found anywhere in this engine checkout -
+  not as a static table entry, not as an `IsKey("...")`/`strcmpi` dispatch,
+  nothing (`grep -rw` across the whole `src/` tree, case-sensitive, turns up
+  nothing but unrelated substrings, e.g. `PEACEMAKING_...` message text for
+  `MUSIC`). Deliberately **not** added to `keywordData.ts`: they may be
+  aliases or commands from an older Sphere version this checkout no longer
+  has. Don't add them back without confirming what target engine version
+  they're for.
 - `DEFMESSAGE`, `EOF` (section keywords) - sentinel/special-cased section
-  types, not present in `CResourceHolder::sm_szResourceBlocks` itself.
-- `HEALING`, `TEST`, `TESTIF` (item/char properties) - not found; worth a
-  manual `grep` in the engine source before assuming removal.
+  types, not present in `CResourceHolder::sm_szResourceBlocks` itself
+  (`DEFMESSAGE` is special-cased in `CServerConfig.cpp`'s resource-section
+  dispatch; `EOF` is checked directly in `CScript.cpp`'s section-header
+  parser and stops parsing when seen). Added by hand, `sourceClass`
+  `CServerConfig`/`CScript` respectively, since the scanner's static-table
+  heuristic can't and won't find either.
+- `TEST`, `TESTIF` - not item/char properties as the old data implied;
+  they're line keywords used inside a `[SKILLMENU]`/menu-style section body
+  (`game/clients/CClientUse.cpp`, alongside `ON`/`MAKEITEM`), gating the
+  option(s) that follow on a skill/resource check or a script expression.
+  Added by hand to `controlKeywords`, `sourceClass` `CClientUse`.
+- Source classes the scanner finds but that aren't accessed via
+  `object.property` syntax at all - `CDialogDef`, `CSpellDef`, `CSkillDef`,
+  `CSkillClassDef`, `CRandGroupDef`, `CWebPageDef`, `CCChampionDef`,
+  `CRegionResourceDef` - are bucketed into `definitionProperties` (keywords
+  set one per line inside a definition section body: `[SPELL]`, `[SKILL]`,
+  `[DIALOG]`, `[WEBPAGE]`, `[CHAMPION]`, a region's `[REGIONRESOURCE]`
+  block). `CRegion` is a real dot-accessible prefix (`REGION.xxx`, verified
+  against `CRegion`'s own reference-dispatch code) and gets its own
+  `regionProperties` bucket instead. See `compile_keyword_data.py`'s
+  `DEFINITION_PROPERTY_CLASSES` and the `source_class == 'CRegion'` check.
 
 Also expect a low rate of false positives in `scan_raw.csv` - e.g. an
 unrelated error-message string, a qualified C++ method name

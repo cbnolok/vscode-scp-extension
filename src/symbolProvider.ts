@@ -7,7 +7,7 @@ import { getOutputChannel } from './outputChannel';
 /**
  * Section types recognized as workspace symbols, normalized to one label
  * each (ITEM/ITEMDEF -> ITEMDEF, TYPE/TYPEDEF -> TYPEDEF). Union of what
- * a_fork_prapilk's symbol provider covered and what a_fork_luxion's
+ * the Prapilk fork's symbol provider covered and what the LuxionUO fork's
  * completion covered - neither alone had the other's coverage.
  */
 const SECTION_TYPE_ALIASES = new Map<string, string>([

@@ -4,8 +4,8 @@ import { WorkspaceSymbolInfo } from './types';
 
 /**
  * Signature help for user-defined FUNCTION sections, inferring parameter
- * names from `local.X = <argv[N]>` lines inside the function body -
- * a_fork_luxion's idea (no other fork implements signature help at all),
+ * names from `local.X = <argv[N]>` lines inside the function body - the
+ * LuxionUO fork's idea (no other fork implements signature help at all),
  * ported to read from the cached symbol index instead of re-scanning the
  * whole workspace on every keystroke.
  */

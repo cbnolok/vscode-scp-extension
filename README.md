@@ -10,6 +10,29 @@ directly from a scan of the SphereServer-X engine source, not scraped
 from a wiki - see `tools/keyword_scan/README.md` if you're maintaining
 that data.
 
+## Provenance
+
+- [SphereServer/vscode-scp-extension](https://github.com/SphereServer/vscode-scp-extension) - the original extension.
+- [BlackBoxEngineering/vscode-scp-extension](https://github.com/BlackBoxEngineering/vscode-scp-extension) - fork.
+- [Prapilk/vscode-scp-extension](https://github.com/Prapilk/vscode-scp-extension) - fork.
+- [LuxionUO/vscode-scp-extension-luxion](https://github.com/LuxionUO/vscode-scp-extension-luxion) - fork.
+
+Every feature below was compared across all four before deciding what to
+build on; none of the four was both correct and complete on its own.
+
+| Area | Primarily from | What was kept / fixed |
+| --- | --- | --- |
+| Grammar structure | LuxionUO | Per-engine-class scoping (`citem-props`, `cchar-functions`, ...) instead of one flat alternation list. |
+| Grammar correctness | Prapilk, +2 found here | Operator alternation ordering, the section-close regex, the `functiony` scope typo, the `ref\d+` fix; plus a missing `#` on an `#include` and an unescaped `.` in `barding.diff`, both only caught by actually running the grammar test suite. |
+| Grammar string escapes | BlackBoxEngineering | Escape-sequence whitelist and a negative-lookbehind string-end pattern. |
+| `language-configuration.json` | Prapilk | Original's block-comment end marker and `[`/`]` bracket entries were broken/missing; folding and indent rules added on top. |
+| Completion | LuxionUO (ideas) + Prapilk (caching) | Deliberately combined, not a straight pick of one - see `CHANGELOG.md`. Extended prefix coverage beyond either (Prapilk only handled `i.`/`src.`/`serv.`/`new.`/`argo.`). |
+| Signature help | LuxionUO | The only one of the four that implemented this at all; ported to read from the cached symbol index instead of rescanning per keystroke. |
+| Workspace symbol index | Prapilk + LuxionUO | Union of section-type coverage - neither alone covered what the other did. |
+| Diagnostics / code actions / formatting | Prapilk, substantially rebuilt | Original had popup-spam reporting, three duplicated Levenshtein implementations, a fake `DISCOVERED_RULES` list, and a real `BEGIN`/`END` block-tracking bug (the formatter knew about it, the structure validator didn't) - all removed or fixed. |
+| Keyword/property/trigger data | New | Scanned from the SphereServer-X engine source rather than scraped from a wiki - none of the four did this. |
+| Unit tests | New | None of the four had real tests beyond an unmodified scaffold placeholder. |
+
 ## Features
 
 - **Syntax highlighting** - class-scoped grammar (separate rules per
@@ -47,15 +70,16 @@ None - no external runtime dependencies.
 
 ## Known gaps
 
-- Property/function/trigger descriptions are sourced from inline C++
-  comments in the engine source where one exists; many entries don't
-  have one yet, so hover text is blank for those. See
-  `tools/keyword_scan/README.md` for how to fill these in (English only).
-- A handful of source classes discovered by the keyword scanner
-  (`CRegion`, `CDialogDef`, `CSkillDef`, `CSpellDef`, and others) aren't
-  yet bucketed into a specific completion prefix - their keywords are
-  still known to diagnostics and the general-fallback completion list,
-  just not offered after a specific `prefix.`.
+- Most property/trigger descriptions are still empty. Only a hand-written,
+  verified-confident subset has been filled in so far (control keywords,
+  section keywords, most expression functions, and the new `regionProperties`/
+  `definitionProperties` buckets) - the much larger item/char/serv property
+  buckets (~1,700 entries) and all 248 triggers are still blank. That's
+  deliberate: a plausible-sounding but wrong description is worse than no
+  description, and neither guessing nor machine translation is an
+  acceptable way to fill this in. See `tools/keyword_scan/README.md` for
+  the review workflow and its English-only, hand-written-preferred,
+  Doxygen-only-for-C++-sourced-text policy.
 
 ## Development
 

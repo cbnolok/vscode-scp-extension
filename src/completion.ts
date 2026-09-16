@@ -7,9 +7,9 @@ type Bucket = keyof KeywordData;
 
 /**
  * Object prefix -> property bucket(s). Wider than any single fork covered
- * (a_fork_prapilk only handled i./src./serv./new./argo.) - extended with
- * cont./act./c./topobj./ref\d+ per the language's actual prefix set (see
- * the "object" patterns in syntaxes/scp.tmLanguage.json).
+ * (the Prapilk fork only handled i./src./serv./new./argo.) - extended with
+ * cont./act./c./topobj./region./ref\d+ per the language's actual prefix set
+ * (see the "object" patterns in syntaxes/scp.tmLanguage.json).
  */
 const PREFIX_TO_BUCKETS: Record<string, Bucket[]> = {
     i: ['itemProperties'],
@@ -24,13 +24,14 @@ const PREFIX_TO_BUCKETS: Record<string, Bucket[]> = {
     chardef: ['charProperties'],
     client: ['charProperties'],
     serv: ['servProperties'],
+    region: ['regionProperties'],
     new: ['itemProperties', 'charProperties'],
     targ: ['itemProperties', 'charProperties'],
 };
 
 // Free-form tag/variable accessors - any name is valid after these, so we
-// deliberately offer no property suggestions (matches a_fork_luxion's fix
-// for `local.*` false suggestions, generalized to the other accessors).
+// deliberately offer no property suggestions (matches the LuxionUO fork's
+// fix for `local.*` false suggestions, generalized to the other accessors).
 const FREEFORM_PREFIXES = new Set(['tag', 'ctag', 'local', 'var', 'dtag', 'dvar', 'dlocal', 'argv']);
 
 function bucketsForPrefix(prefix: string): Bucket[] | undefined {
@@ -169,11 +170,14 @@ export class SphereScriptCompletionItemProvider implements vscode.CompletionItem
         const range = replacementRange(position, position.character - wordMatch[1].length);
 
         const items: vscode.CompletionItem[] = [];
-        for (const entry of [...keywordData.controlKeywords, ...keywordData.commands]) {
+        for (const entry of [...keywordData.controlKeywords, ...keywordData.commands, ...keywordData.definitionProperties]) {
             if (entry.name.startsWith(partial)) {
                 const item = new vscode.CompletionItem(entry.name, vscode.CompletionItemKind.Keyword);
                 item.insertText = entry.name;
                 item.range = range;
+                if (entry.description) {
+                    item.documentation = new vscode.MarkdownString(entry.description);
+                }
                 items.push(item);
             }
         }

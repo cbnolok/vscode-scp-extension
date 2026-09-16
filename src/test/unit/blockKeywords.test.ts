@@ -20,6 +20,15 @@ suite('blockKeywords', () => {
         assert.strictEqual(getExpectedClosing('DOSWITCH'), 'ENDDO');
     });
 
+    test('ENDRAND/ENDSWITCH are recognized closers, even though ENDDO is canonical', () => {
+        // The engine accepts every END* keyword as an interchangeable block
+        // terminator (CScriptObj::OnTriggerRun), so these must still count
+        // as *a* closing keyword even though getExpectedClosing() only ever
+        // suggests ENDDO for DORAND/DOSWITCH.
+        assert.ok(isClosingKeyword('ENDRAND'));
+        assert.ok(isClosingKeyword('ENDSWITCH'));
+    });
+
     test('BEGIN/END is tracked as its own pair (DOSWITCH case blocks)', () => {
         assert.ok(isOpeningKeyword('BEGIN'));
         assert.strictEqual(getExpectedClosing('BEGIN'), 'END');

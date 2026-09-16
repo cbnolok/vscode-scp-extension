@@ -19,6 +19,8 @@ export function buildKnowledgeBase(): KnowledgeBase {
             ...names(keywordData.charProperties),
             ...names(keywordData.servProperties),
             ...names(keywordData.expressionFunctions),
+            ...names(keywordData.regionProperties),
+            ...names(keywordData.definitionProperties),
             ...names(keywordData.unclassified),
         ]),
         events: new Set(names(keywordData.triggers)),
@@ -38,6 +40,8 @@ export function buildDescriptionIndex(): Map<string, string> {
         ...keywordData.controlKeywords,
         ...keywordData.expressionFunctions,
         ...keywordData.commands,
+        ...keywordData.regionProperties,
+        ...keywordData.definitionProperties,
         ...keywordData.unclassified,
     ];
     for (const entry of allBuckets) {

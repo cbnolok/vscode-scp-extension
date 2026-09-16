@@ -34,3 +34,30 @@ none of the four was both correct and complete on its own.
   bracket matching entirely; added folding markers and indent rules.
 - Real unit tests (`stringUtils`, `blockKeywords`) - none of the four
   prior codebases had tests beyond an unmodified scaffold placeholder.
+
+### Changed (post-bootstrap data pass)
+
+- Reclassified the keyword scanner's ~400-entry `unclassified` bucket:
+  added two new buckets, `regionProperties` (real `REGION.xxx` dot-accessed
+  properties, wired to a `region.` completion prefix) and
+  `definitionProperties` (keywords set one per line inside a definition
+  section body - `[SPELL]`, `[SKILL]`, `[DIALOG]`, `[WEBPAGE]`,
+  `[CHAMPION]`, a region's `[REGIONRESOURCE]` block); routed the rest into
+  `itemProperties`/`charProperties`/`expressionFunctions`/`controlKeywords`
+  by source class; dropped `CUOInstall` entirely (client `.mul`/`.idx`
+  filenames, not script keywords - a scanner false positive).
+- Manually added `DEFMESSAGE`/`EOF` (section keywords) and `TEST`/`TESTIF`
+  (control keywords, used inside `[SKILLMENU]`-style bodies) after
+  confirming their real behavior directly in the engine source; confirmed
+  `BC`/`CHUNK`/`MUSIC`/`PROPS`/`HEALING` genuinely don't exist in the
+  current engine checkout rather than carrying them forward unverified.
+- Fixed `blockKeywords.ts`: `ENDRAND`/`ENDSWITCH` were missing from
+  `CLOSING_KEYWORDS`, so closing a `DORAND`/`DOSWITCH` block with either
+  (which the engine accepts - `CScriptObj::OnTriggerRun` treats every
+  `END*` keyword as an interchangeable block terminator) was reported as
+  an unclosed block instead of just a non-canonical closer.
+- Set a description-sourcing policy going forward: a C++ source comment is
+  only ever used as description text if it's Doxygen-tagged (`///`, `//!`);
+  a plain `//` comment is a contributor note, not user-facing prose. Hand-
+  written descriptions (verified against the engine source, never guessed)
+  are preferred either way. See `tools/keyword_scan/README.md`.

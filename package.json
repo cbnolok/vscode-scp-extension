@@ -8,7 +8,7 @@
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
-    "url": "git://github.com/Sphereserver/vscode-scp-extension.git"
+    "url": "git://github.com/SphereServer/vscode-scp-extension.git"
   },
   "engines": {
     "vscode": "^1.80.0"
