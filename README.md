@@ -70,20 +70,28 @@ None - no external runtime dependencies.
 
 ## Known gaps
 
-- Many property/trigger descriptions are still empty. `controlKeywords` and
-  `regionProperties` are fully filled; `definitionProperties` (88/91) and
-  `sectionKeywords` (57/63) are nearly complete. `triggers` is at 86/248
-  (35%), `itemProperties` at 138/626 (22%), `charProperties` at 119/581
-  (20%) - all hand-written and grounded in real usage from a Scripts-X
-  script-base scan plus the SphereServer-X mediawiki docs, not guessed or
-  machine-translated. `servProperties` (7/104) and `commands` (5/33) have
-  barely been started. That's deliberate: a plausible-sounding but wrong
-  description is worse than no description, so an entry was left blank
-  whenever its usage in the script base was ambiguous or absent, rather
-  than guessed. See `tools/keyword_scan/README.md` for the review workflow
-  and its English-only, hand-written-preferred, Doxygen-only-for-C++-sourced-
-  text policy. Next up, in priority order: finish `triggers`, then continue
-  `itemProperties`/`charProperties`, then `servProperties`.
+- Most property/trigger descriptions are now filled (1545/1907, ~81%
+  overall), grounded in real usage from a Scripts-X script-base scan
+  and the SphereServer-X mediawiki docs - never guessed or
+  machine-translated. `controlKeywords` and `regionProperties` are
+  fully filled; `definitionProperties` (88/91) and `sectionKeywords`
+  (57/63) are essentially done. `triggers` is at 204/248 (82%),
+  `itemProperties` at 452/626 (72%), `charProperties` at 476/581
+  (82%), `servProperties` at 83/104 (80%), `expressionFunctions` at
+  80/87, `commands` at 31/33. The remaining blanks in each bucket are
+  disproportionately champion-system and house-customization
+  internals, and a handful of AOS-era equip-bonus properties, for
+  which neither the script base nor the mediawiki docs have a
+  documented effect - a plausible-sounding but wrong description is
+  worse than no description, so these were deliberately left blank
+  rather than guessed. See `tools/keyword_scan/README.md` for the
+  review workflow and its English-only, hand-written-preferred,
+  Doxygen-only-for-C++-sourced-text policy (note: reading the C++
+  engine source directly - even non-Doxygen identifiers/comments, not
+  just quoting them - turned out to be worth calling out explicitly as
+  off-limits for this work too, since it's easy for a research pass to
+  drift into "inferring from an enum name," which is guessing by
+  another name).
 
 ## Development
 
