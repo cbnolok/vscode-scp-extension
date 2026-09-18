@@ -70,14 +70,14 @@ None - no external runtime dependencies.
 
 ## Known gaps
 
-- Most property/trigger descriptions are now filled (1545/1907, ~81%
+- Most property/trigger descriptions are now filled (1608/1908, ~84%
   overall), grounded in real usage from a Scripts-X script-base scan
   and the SphereServer-X mediawiki docs - never guessed or
   machine-translated. `controlKeywords` and `regionProperties` are
   fully filled; `definitionProperties` (88/91) and `sectionKeywords`
-  (57/63) are essentially done. `triggers` is at 204/248 (82%),
-  `itemProperties` at 452/626 (72%), `charProperties` at 476/581
-  (82%), `servProperties` at 83/104 (80%), `expressionFunctions` at
+  (57/63) are essentially done. `triggers` is at 210/248 (85%),
+  `itemProperties` at 489/626 (78%), `charProperties` at 495/581
+  (85%), `servProperties` at 83/104 (80%), `expressionFunctions` at
   80/87, `commands` at 31/33. The remaining blanks in each bucket are
   disproportionately champion-system and house-customization
   internals, and a handful of AOS-era equip-bonus properties, for
