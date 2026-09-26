@@ -51,7 +51,12 @@ build on; none of the four was both correct and complete on its own.
   and user-defined symbols (jump-to-definition info included).
 - **Go to Definition** - for `FUNCTION`/`ITEMDEF`/`CHARDEF`/`DEFNAME`/...
   across the whole workspace, with an incremental, debounced symbol
-  index (not a re-scan per keystroke).
+  index (not a re-scan per keystroke). Resolves any symbol name under
+  the cursor, case-insensitively, wherever it appears - section headers,
+  `ID=`/`TYPE=` values, `RESOURCES` lines, function calls - including
+  numeric/hex item ids (`ID=01b78`). Use `Ctrl+Click`, `F12`, or the
+  right-click menu. If the index ever looks stale, run
+  **SphereScript: Reindex Workspace Symbols** from the Command Palette.
 - **Diagnostics** - unclosed/mismatched `IF`/`WHILE`/`FOR*`/`DORAND`/
   `DOSWITCH` blocks (including `BEGIN`/`END` case blocks), unbalanced
   `()`/`<>`, `DEFNAME` mismatches, unknown section keywords/properties
@@ -63,6 +68,23 @@ build on; none of the four was both correct and complete on its own.
   headers that don't have one yet.
 - **Format Document** (`Ctrl+Alt+L` / `Cmd+Alt+L`) - reindents based on
   block structure, honoring your tabs/spaces editor settings.
+
+## Customizing colors
+
+Highlighting uses standard TextMate scopes (`source.scp`), so you can
+recolor them in `settings.json`, for example:
+
+```json
+"editor.tokenColorCustomizations": {
+    "textMateRules": [
+        { "scope": "entity.name.section.scp", "settings": { "foreground": "#80DFFF" } },
+        { "scope": "support.class.section.header.scp", "settings": { "foreground": "#80DFFF" } }
+    ]
+}
+```
+
+Run **Developer: Inspect Editor Tokens and Scopes** on any token to see
+which scope to target.
 
 ## Requirements
 
