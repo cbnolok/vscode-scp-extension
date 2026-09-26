@@ -11,6 +11,10 @@ import { getOutputChannel } from './outputChannel';
 
 export const DIAGNOSTIC_SOURCE = 'SphereScript';
 
+function isScpDocument(document: vscode.TextDocument): boolean {
+    return document.languageId === 'scp' || /\.scp$/i.test(document.uri.path);
+}
+
 function makeDiagnostic(range: vscode.Range, message: string, severity: vscode.DiagnosticSeverity, code: string): vscode.Diagnostic {
     const diagnostic = new vscode.Diagnostic(range, message, severity);
     diagnostic.source = DIAGNOSTIC_SOURCE;
@@ -41,7 +45,19 @@ export function activateDiagnostics(
     context.subscriptions.push(statusBarItem);
 
     let isScanningWorkspace = false;
-    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    let scanAgain = false;
+    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{scp,SCP}');
+    context.subscriptions.push(watcher);
+
+    function cancelPendingUpdate(uri: vscode.Uri): void {
+        const key = uri.toString();
+        const timer = debounceTimers.get(key);
+        if (timer) {
+            clearTimeout(timer);
+            debounceTimers.delete(key);
+        }
+    }
 
     function log(message: string): void {
         outputChannel.appendLine(message);
@@ -63,67 +79,107 @@ export function activateDiagnostics(
 
     async function scanAllWorkspaceForDiagnostics(): Promise<void> {
         if (isScanningWorkspace) {
-            log('Full workspace diagnostic scan already in progress. Skipping.');
+            scanAgain = true;
             return;
         }
         isScanningWorkspace = true;
-        diagnosticCollection.clear();
-
-        const allScpFiles = await vscode.workspace.findFiles('**/*.scp', '**/node_modules/**');
-        const total = allScpFiles.length;
-        let processed = 0;
-
-        if (total > 0) {
-            statusBarItem.show();
-        }
-
-        for (const fileUri of allScpFiles) {
-            try {
-                const document = await vscode.workspace.openTextDocument(fileUri);
-                diagnosticCollection.set(document.uri, runAllChecks(document));
-            } catch (error) {
-                log(`Error processing diagnostics for ${fileUri.fsPath}: ${error}`);
-            } finally {
-                processed++;
-                statusBarItem.text = `$(sync~spin) SphereScript: ${processed}/${total}`;
+        try {
+            const allScpFiles = await vscode.workspace.findFiles('**/*.{scp,SCP}', '**/{.git,node_modules}/**');
+            const total = allScpFiles.length;
+            let processed = 0;
+            if (total > 0) {
+                statusBarItem.show();
+            }
+            for (const fileUri of allScpFiles) {
+                try {
+                    const document = await vscode.workspace.openTextDocument(fileUri);
+                    updateDiagnostics(document);
+                } catch (error) {
+                    log(`Error processing diagnostics for ${fileUri.fsPath}: ${error}`);
+                } finally {
+                    processed++;
+                    statusBarItem.text = `$(sync~spin) SphereScript: ${processed}/${total}`;
+                }
+            }
+            for (const document of vscode.workspace.textDocuments) {
+                if (isScpDocument(document)) {
+                    updateDiagnostics(document);
+                }
+            }
+            log(`Finished full workspace diagnostic scan. Processed ${processed} files.`);
+        } catch (error) {
+            log(`Full workspace diagnostic scan failed: ${error}`);
+        } finally {
+            statusBarItem.hide();
+            isScanningWorkspace = false;
+            if (scanAgain) {
+                scanAgain = false;
+                void scanAllWorkspaceForDiagnostics();
             }
         }
+    }
 
-        statusBarItem.hide();
-        log(`Finished full workspace diagnostic scan. Processed ${processed} files.`);
-        isScanningWorkspace = false;
+    if (symbolLookup.onDidIndex) {
+        context.subscriptions.push(symbolLookup.onDidIndex(() => {
+            void scanAllWorkspaceForDiagnostics();
+        }));
     }
 
     const updateDiagnosticsTrigger = (document: vscode.TextDocument) => {
-        if (document.languageId === 'scp' && !isScanningWorkspace) {
+        if (isScpDocument(document) && !isScanningWorkspace) {
             updateDiagnostics(document);
         }
     };
 
     context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
-        setTimeout(() => updateDiagnosticsTrigger(document), 100);
+        updateDiagnosticsTrigger(document);
     }));
 
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
-        if (debounceTimer) {
-            clearTimeout(debounceTimer);
+        if (!isScpDocument(event.document)) {
+            return;
         }
-        debounceTimer = setTimeout(() => updateDiagnosticsTrigger(event.document), 300);
+        cancelPendingUpdate(event.document.uri);
+        const key = event.document.uri.toString();
+        const timer = setTimeout(() => {
+            debounceTimers.delete(key);
+            updateDiagnosticsTrigger(event.document);
+        }, 300);
+        debounceTimers.set(key, timer);
     }));
 
-    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(updateDiagnosticsTrigger));
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(document => {
+        cancelPendingUpdate(document.uri);
+        updateDiagnosticsTrigger(document);
+    }));
 
     context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(document => {
-        if (document.languageId === 'scp' && !isScanningWorkspace) {
+        cancelPendingUpdate(document.uri);
+        if (isScpDocument(document) && document.uri.scheme === 'untitled') {
             diagnosticCollection.delete(document.uri);
         }
     }));
 
+    const refreshFile = (uri: vscode.Uri): void => {
+        void vscode.workspace.openTextDocument(uri).then(updateDiagnosticsTrigger, error => {
+            log(`Error processing diagnostics for ${uri.fsPath}: ${error}`);
+        });
+    };
+    context.subscriptions.push(
+        watcher.onDidCreate(refreshFile),
+        watcher.onDidChange(refreshFile),
+        watcher.onDidDelete(uri => {
+            cancelPendingUpdate(uri);
+            diagnosticCollection.delete(uri);
+        })
+    );
+
     context.subscriptions.push({
         dispose() {
-            if (debounceTimer) {
-                clearTimeout(debounceTimer);
+            for (const timer of debounceTimers.values()) {
+                clearTimeout(timer);
             }
+            debounceTimers.clear();
         },
     });
 
@@ -138,6 +194,7 @@ function validateSymbols(
     knowledgeBase: KnowledgeBase,
     symbolLookup: SymbolLookup
 ): void {
+    const symbolIndexReady = symbolLookup.isReady?.() ?? true;
     for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
         const line = document.lineAt(lineIndex);
 
@@ -173,7 +230,8 @@ function validateSymbols(
         if (sectionMatch) {
             const keyword = sectionMatch[1];
             const upperKeyword = keyword.toUpperCase();
-            if (!knowledgeBase.keywords.has(upperKeyword) && upperKeyword !== 'EOF' && !symbolLookup.getLocation(upperKeyword)) {
+            if (!knowledgeBase.keywords.has(upperKeyword) && upperKeyword !== 'EOF'
+                && symbolIndexReady && !symbolLookup.getLocation(upperKeyword)) {
                 const bracketPos = line.text.indexOf('[');
                 const keywordStartPos = bracketPos + 1;
                 const range = new vscode.Range(lineIndex, keywordStartPos, lineIndex, keywordStartPos + keyword.length);
@@ -192,7 +250,7 @@ function validateSymbols(
             const propertyName = propMatch[1];
             const upperProp = propertyName.toUpperCase();
 
-            if (upperProp !== 'ON'
+            if (symbolIndexReady && upperProp !== 'ON'
                 && !knowledgeBase.properties.has(upperProp)
                 && !knowledgeBase.commands.has(upperProp)
                 && !symbolLookup.getLocation(upperProp)
@@ -240,7 +298,7 @@ function validateSymbols(
                 || knowledgeBase.commands.has(upperMember)
                 || !!symbolLookup.getLocation(upperMember);
 
-            if (!isKnown) {
+            if (!isKnown && symbolIndexReady) {
                 const startCol = match.index + objectPrefix.length + 1;
                 const range = new vscode.Range(lineIndex, startCol, lineIndex, startCol + memberName.length);
                 diagnostics.push(makeDiagnostic(

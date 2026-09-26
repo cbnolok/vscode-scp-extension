@@ -25,6 +25,10 @@ export interface SymbolLocation {
 
 export interface SymbolLookup {
     getLocation(name: string): SymbolLocation | undefined;
+    /** False when the initial scan failed; symbol-dependent diagnostics wait. */
+    isReady?(): boolean;
+    /** Fires after a successful scan, including a manual reindex. */
+    onDidIndex?: vscode.Event<void>;
 }
 
 /** A user-defined FUNCTION/ITEMDEF/CHARDEF/... symbol found in the workspace. */

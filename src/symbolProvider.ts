@@ -32,7 +32,7 @@ const SECTION_TYPE_ALIASES = new Map<string, string>([
 ]);
 
 const SECTION_HEADER_RE = /^\s*\[([A-Za-z0-9_]+)\s+([^\]]*)\]/;
-const DEFNAME_RE = /^DEFNAME\s*=\s*([a-zA-Z0-9_]+)/i;
+const DEFNAME_RE = /^\s*DEFNAME\s*=\s*([a-zA-Z0-9_]+)/i;
 const LOCAL_ARGV_RE = /^\s*local\.([A-Za-z0-9_]+).*<argv\[/i;
 
 function parseDocumentSymbols(text: string, uri: vscode.Uri, fileBaseName: string): WorkspaceSymbolInfo[] {
@@ -44,10 +44,10 @@ function parseDocumentSymbols(text: string, uri: vscode.Uri, fileBaseName: strin
         const line = lines[i];
         const sectionMatch = line.match(SECTION_HEADER_RE);
 
-        if (sectionMatch) {
-            if (current) {
-                symbols.push(current);
-                current = null;
+        if (/^\s*\[/.test(line)) {
+            current = null;
+            if (!sectionMatch) {
+                continue;
             }
             const kind = SECTION_TYPE_ALIASES.get(sectionMatch[1].toLowerCase());
             const name = sectionMatch[2].trim().split(/\s+/)[0];
@@ -57,37 +57,25 @@ function parseDocumentSymbols(text: string, uri: vscode.Uri, fileBaseName: strin
             const startCol = line.indexOf('[');
             const range = new vscode.Range(i, startCol, i, line.length);
             const info: WorkspaceSymbolInfo = { name, kind, uri, range, locals: [], file: fileBaseName };
-            if (kind === 'FUNCTION') {
-                current = info; // held open so we can collect its locals below
-            } else {
-                symbols.push(info);
-            }
+            symbols.push(info);
+            current = info;
             continue;
         }
 
         const defnameMatch = line.match(DEFNAME_RE);
-        if (defnameMatch && !current) {
-            // A DEFNAME on its own (not inside a FUNCTION body) aliases the
-            // most recently pushed section symbol, if any is on this line's
-            // block - handled by diagnostics separately; here we just also
-            // index the alt name so go-to-definition/hover find it too.
-            const last = symbols[symbols.length - 1];
-            if (last) {
-                symbols.push({ ...last, name: defnameMatch[1] });
-            }
+        if (defnameMatch && current && current.kind !== 'FUNCTION') {
+            const startCol = line.toUpperCase().indexOf(defnameMatch[1].toUpperCase(), line.indexOf('='));
+            const range = new vscode.Range(i, startCol, i, startCol + defnameMatch[1].length);
+            symbols.push({ ...current, name: defnameMatch[1], range });
             continue;
         }
 
-        if (current) {
+        if (current?.kind === 'FUNCTION') {
             const localMatch = line.match(LOCAL_ARGV_RE);
             if (localMatch) {
                 current.locals.push(localMatch[1]);
             }
         }
-    }
-
-    if (current) {
-        symbols.push(current);
     }
 
     return symbols;
@@ -147,7 +135,10 @@ export class SphereScriptSymbolProvider {
     private static symbolsByUri = new Map<string, WorkspaceSymbolInfo[]>();
     private static byName = new Map<string, WorkspaceSymbolInfo>();
     private static ready = false;
-    private static debounceTimer: NodeJS.Timeout | undefined;
+    private static listenersRegistered = false;
+    private static debounceTimers = new Map<string, NodeJS.Timeout>();
+    private static indexCompleteEmitter = new vscode.EventEmitter<void>();
+    static readonly onDidIndex = SphereScriptSymbolProvider.indexCompleteEmitter.event;
 
     static isReady(): boolean {
         return SphereScriptSymbolProvider.ready;
@@ -173,14 +164,23 @@ export class SphereScriptSymbolProvider {
     private static indexSymbols(uri: vscode.Uri, symbols: WorkspaceSymbolInfo[]): void {
         const uriKey = uri.toString();
         const previous = SphereScriptSymbolProvider.symbolsByUri.get(uriKey);
+        SphereScriptSymbolProvider.symbolsByUri.set(uriKey, symbols);
         if (previous) {
             for (const s of previous) {
                 if (SphereScriptSymbolProvider.byName.get(s.name.toUpperCase())?.uri.toString() === uriKey) {
                     SphereScriptSymbolProvider.byName.delete(s.name.toUpperCase());
+                    // A second file may define the same name. Restore it when
+                    // the current file changes or disappears.
+                    for (const entries of SphereScriptSymbolProvider.symbolsByUri.values()) {
+                        const replacement = entries.find(entry => entry.name.toUpperCase() === s.name.toUpperCase());
+                        if (replacement) {
+                            SphereScriptSymbolProvider.byName.set(s.name.toUpperCase(), replacement);
+                            break;
+                        }
+                    }
                 }
             }
         }
-        SphereScriptSymbolProvider.symbolsByUri.set(uriKey, symbols);
         for (const s of symbols) {
             const key = s.name.toUpperCase();
             if (!SphereScriptSymbolProvider.byName.has(key)) {
@@ -203,29 +203,70 @@ export class SphereScriptSymbolProvider {
 
     static clearSymbolsForDocument(uri: vscode.Uri): void {
         const uriKey = uri.toString();
+        SphereScriptSymbolProvider.cancelPendingUpdate(uri);
         const previous = SphereScriptSymbolProvider.symbolsByUri.get(uriKey);
         if (!previous) {
             return;
         }
+        SphereScriptSymbolProvider.symbolsByUri.delete(uriKey);
         for (const s of previous) {
             if (SphereScriptSymbolProvider.byName.get(s.name.toUpperCase())?.uri.toString() === uriKey) {
                 SphereScriptSymbolProvider.byName.delete(s.name.toUpperCase());
+                for (const entries of SphereScriptSymbolProvider.symbolsByUri.values()) {
+                    const replacement = entries.find(entry => entry.name.toUpperCase() === s.name.toUpperCase());
+                    if (replacement) {
+                        SphereScriptSymbolProvider.byName.set(s.name.toUpperCase(), replacement);
+                        break;
+                    }
+                }
             }
         }
-        SphereScriptSymbolProvider.symbolsByUri.delete(uriKey);
     }
 
-    static async reinitialize(context: vscode.ExtensionContext): Promise<void> {
+    private static cancelPendingUpdate(uri: vscode.Uri): void {
+        const key = uri.toString();
+        const timer = SphereScriptSymbolProvider.debounceTimers.get(key);
+        if (timer) {
+            clearTimeout(timer);
+            SphereScriptSymbolProvider.debounceTimers.delete(key);
+        }
+    }
+
+    private static async refreshFile(uri: vscode.Uri): Promise<void> {
+        const openDocument = vscode.workspace.textDocuments.find(document => document.uri.toString() === uri.toString());
+        if (openDocument?.languageId === 'scp') {
+            SphereScriptSymbolProvider.buildSymbolTableFromText(openDocument.getText(), uri);
+            return;
+        }
+        try {
+            const content = await fs.readFile(uri.fsPath, 'utf8');
+            SphereScriptSymbolProvider.buildSymbolTableFromText(content, uri);
+        } catch (error) {
+            getOutputChannel().appendLine(`[symbolProvider] failed to read ${uri.fsPath}: ${error}`);
+        }
+    }
+
+    static async reinitialize(): Promise<void> {
+        for (const timer of SphereScriptSymbolProvider.debounceTimers.values()) {
+            clearTimeout(timer);
+        }
+        SphereScriptSymbolProvider.debounceTimers.clear();
         SphereScriptSymbolProvider.symbolsByUri.clear();
         SphereScriptSymbolProvider.byName.clear();
         SphereScriptSymbolProvider.ready = false;
-        await SphereScriptSymbolProvider.initialize(context);
+        await SphereScriptSymbolProvider.scanWorkspace();
     }
 
     static async initialize(context: vscode.ExtensionContext): Promise<void> {
-        if (SphereScriptSymbolProvider.ready) {
+        if (SphereScriptSymbolProvider.listenersRegistered) {
             return;
         }
+        SphereScriptSymbolProvider.listenersRegistered = true;
+        SphereScriptSymbolProvider.registerListeners(context);
+        await SphereScriptSymbolProvider.scanWorkspace();
+    }
+
+    private static async scanWorkspace(): Promise<void> {
         const out = getOutputChannel();
 
         await vscode.window.withProgress(
@@ -287,33 +328,51 @@ export class SphereScriptSymbolProvider {
         );
 
         SphereScriptSymbolProvider.ready = true;
+        SphereScriptSymbolProvider.indexCompleteEmitter.fire();
 
+    }
+
+    private static registerListeners(context: vscode.ExtensionContext): void {
+        const watcher = vscode.workspace.createFileSystemWatcher('**/*.{scp,SCP}');
+        context.subscriptions.push(watcher);
         context.subscriptions.push(
             vscode.workspace.onDidOpenTextDocument(document => {
                 if (document.languageId === 'scp') {
-                    SphereScriptSymbolProvider.buildSymbolTable(document);
+                    void SphereScriptSymbolProvider.buildSymbolTable(document);
                 }
             }),
             vscode.workspace.onDidChangeTextDocument(event => {
                 if (event.document.languageId !== 'scp') {
                     return;
                 }
-                if (SphereScriptSymbolProvider.debounceTimer) {
-                    clearTimeout(SphereScriptSymbolProvider.debounceTimer);
-                }
-                SphereScriptSymbolProvider.debounceTimer = setTimeout(() => {
-                    SphereScriptSymbolProvider.buildSymbolTable(event.document);
+                SphereScriptSymbolProvider.cancelPendingUpdate(event.document.uri);
+                const key = event.document.uri.toString();
+                const timer = setTimeout(() => {
+                    SphereScriptSymbolProvider.debounceTimers.delete(key);
+                    void SphereScriptSymbolProvider.buildSymbolTable(event.document);
                 }, 1000);
+                SphereScriptSymbolProvider.debounceTimers.set(key, timer);
             }),
             vscode.workspace.onDidSaveTextDocument(document => {
                 if (document.languageId === 'scp') {
-                    SphereScriptSymbolProvider.buildSymbolTable(document);
+                    SphereScriptSymbolProvider.cancelPendingUpdate(document.uri);
+                    void SphereScriptSymbolProvider.buildSymbolTable(document);
                 }
             }),
+            watcher.onDidCreate(uri => { void SphereScriptSymbolProvider.refreshFile(uri); }),
+            watcher.onDidChange(uri => { void SphereScriptSymbolProvider.refreshFile(uri); }),
+            watcher.onDidDelete(uri => SphereScriptSymbolProvider.clearSymbolsForDocument(uri)),
             vscode.commands.registerCommand('spherescript.reindexSymbols', async () => {
-                await SphereScriptSymbolProvider.reinitialize(context);
+                await SphereScriptSymbolProvider.reinitialize();
                 vscode.window.setStatusBarMessage('SphereScript: symbols reindexed', 3000);
-            })
+            }),
+            { dispose: () => {
+                for (const timer of SphereScriptSymbolProvider.debounceTimers.values()) {
+                    clearTimeout(timer);
+                }
+                SphereScriptSymbolProvider.debounceTimers.clear();
+                SphereScriptSymbolProvider.listenersRegistered = false;
+            } }
         );
     }
 }

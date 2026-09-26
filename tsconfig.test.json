@@ -5,5 +5,5 @@
     "types": ["node", "mocha"]
   },
   "exclude": ["node_modules"],
-  "include": ["src/stringUtils.ts", "src/blockKeywords.ts", "src/test/unit/**/*.ts"]
+  "include": ["src/stringUtils.ts", "src/blockKeywords.ts", "src/activation.ts", "src/test/unit/**/*.ts"]
 }

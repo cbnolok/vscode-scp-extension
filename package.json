@@ -65,8 +65,9 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "node ./out/test/runTest.js",
-    "test:unit": "tsc -p tsconfig.test.json && mocha"
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "tsc -p tsconfig.test.json && mocha",
+    "test:integration": "node ./out/test/runTest.js"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

@@ -9,6 +9,7 @@ import { activateDiagnostics } from './diagnostics';
 import { SphereScriptCodeActionProvider } from './codeActions';
 import { SphereScriptDocumentFormattingEditProvider } from './formatting';
 import { SymbolLookup } from './types';
+import { startDiagnosticsAfterIndex } from './activation';
 
 export function activate(context: vscode.ExtensionContext): void {
     const out = getOutputChannel();
@@ -33,6 +34,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const knowledgeBase = buildKnowledgeBase();
     const symbolLookup: SymbolLookup = {
         getLocation: name => SphereScriptSymbolProvider.getLocation(name),
+        isReady: () => SphereScriptSymbolProvider.isReady(),
+        onDidIndex: SphereScriptSymbolProvider.onDidIndex,
     };
 
     context.subscriptions.push(
@@ -47,13 +50,14 @@ export function activate(context: vscode.ExtensionContext): void {
         )
     );
 
-    // Diagnostics do a workspace-wide scan on activation and check
-    // symbols via symbolLookup, so they must not start until the symbol
-    // index has finished its own initial scan - otherwise the first pass
-    // would misreport every user-defined symbol as unknown.
-    SphereScriptSymbolProvider.initialize(context).then(() => {
-        activateDiagnostics(context, knowledgeBase, symbolLookup);
-    });
+    // Wait for the initial symbol scan when possible. If it fails, keep
+    // structural diagnostics available and let Reindex recover the symbol
+    // dependent checks later.
+    void startDiagnosticsAfterIndex(
+        () => SphereScriptSymbolProvider.initialize(context),
+        () => activateDiagnostics(context, knowledgeBase, symbolLookup),
+        error => out.appendLine(`[extension] initial symbol indexing failed: ${error}. Run "SphereScript: Reindex Workspace Symbols" to retry.`)
+    ).catch(error => out.appendLine(`[extension] diagnostics initialization failed: ${error}`));
 }
 
 export function deactivate(): void {

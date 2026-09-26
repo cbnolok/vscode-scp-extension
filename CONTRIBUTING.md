@@ -38,7 +38,12 @@ npm install
 npm run compile   # tsc, must be clean
 npm run lint      # eslint, must be clean
 npm run test:unit # pure-logic tests (stringUtils, blockKeywords) - fast, no VS Code host needed
+npm test          # compile, lint, unit tests, and VS Code extension-host integration tests
 ```
+
+The extension-host tests use an installed VS Code on this Linux development
+machine or download VS Code elsewhere. Set `VSCODE_EXECUTABLE_PATH` to use a
+specific installation. On Linux, `xvfb-run` is used when available.
 
 ## Language policy
 
